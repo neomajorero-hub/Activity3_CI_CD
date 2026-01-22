@@ -1,0 +1,61 @@
+name: CI - Node.js MySQL API
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: mypassword 
+          MYSQL_DATABASE: companydb
+          MYSQL_USER: fazt
+          MYSQL_PASSWORD: faztpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u fazt -pfaztpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Wait for MySQL to be ready
+        run: |
+          echo "Waiting for MySQL..."
+          until mysql -h 127.0.0.1 -u fazt -pfaztpassword -e "SELECT 1"; do
+            sleep 3
+          done
+
+      - name: Initialize database
+        run: |
+          mysql -h 127.0.0.1 -u fazt -pfaztpassword companydb < db/database.sql
+
+      - name: Run tests
+        env:
+          PORT: 3000
+          DB_HOST: 127.0.0.1
+          DB_USER: fazt
+          DB_PASSWORD: faztpassword
+          DB_DATABASE: companydb
+          DB_PORT: 3306
+        run: npm run test
