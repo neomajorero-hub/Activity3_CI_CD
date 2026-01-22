@@ -27,11 +27,11 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h localhost -u ${{ secrets.DB_USER }} -p${{ secrets.DB_PASSWORD }}"
+          --health-cmd="mysqladmin ping -h localhost -u fazt -pfaztpassword"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
-
+          
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
