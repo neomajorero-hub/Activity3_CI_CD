@@ -9,19 +9,25 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    
+    # ESTRATEGIA MATRIZ (Requisito 7.5): Prueba en Node 18 y 20 a la vez
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20]
 
     services:
       mysql:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: mypassword 
-          MYSQL_DATABASE: companydb
-          MYSQL_USER: fazt
-          MYSQL_PASSWORD: faztpassword
+          MYSQL_DATABASE: ${{ secrets.DB_DATABASE }}
+          MYSQL_USER: ${{ secrets.DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.DB_PASSWORD }}
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h localhost -u fazt -pfaztpassword"
+          --health-cmd="mysqladmin ping -h localhost -u ${{ secrets.DB_USER }} -p${{ secrets.DB_PASSWORD }}"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
@@ -30,32 +36,54 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Use Node.js
+      # Usa la versión de Node que toque en este momento (18 o 20)
+      - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
         run: npm install
 
+      # REQUISITO 7.1: Lint (Calidad de código)
+      - name: Run linter
+        run: npm run lint
+        continue-on-error: true
+
       - name: Wait for MySQL to be ready
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
           echo "Waiting for MySQL..."
-          until mysql -h 127.0.0.1 -u fazt -pfaztpassword -e "SELECT 1"; do
+          until mysql -h 127.0.0.1 -u $DB_USER -p$DB_PASSWORD -e "SELECT 1"; do
             sleep 3
           done
 
       - name: Initialize database
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_DATABASE: ${{ secrets.DB_DATABASE }}
         run: |
-          mysql -h 127.0.0.1 -u fazt -pfaztpassword companydb < db/database.sql
+          mysql -h 127.0.0.1 -u $DB_USER -p$DB_PASSWORD $DB_DATABASE < db/database.sql
 
-      - name: Run tests
+      # REQUISITO 7.2: Tests con cobertura obligatoria
+      - name: Run tests with coverage
         env:
           PORT: 3000
           DB_HOST: 127.0.0.1
-          DB_USER: fazt
-          DB_PASSWORD: faztpassword
-          DB_DATABASE: companydb
           DB_PORT: 3306
-        run: npm run test
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_DATABASE: ${{ secrets.DB_DATABASE }}
+        run: npm run test:coverage
+
+      # REQUISITO 7.3: Subir artefactos (Evidencias)
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-node-${{ matrix.node-version }}
+          path: coverage/
