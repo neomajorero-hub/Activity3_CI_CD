@@ -1,0 +1,95 @@
+name: CD - Despliegue Manual a Render
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Etiqueta a crear (ej: v1.0.0, v0.2.0-test)'
+        required: true
+        type: string
+
+jobs:
+  validate-and-deploy:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20]
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpass     # solo interna, no afecta a tu app
+          MYSQL_DATABASE: ${{ secrets.DB_DATABASE }}
+          MYSQL_USER: ${{ secrets.DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u ${{ secrets.DB_USER }} -p${{ secrets.DB_PASSWORD }}"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Esperar MySQL listo
+        run: |
+          echo "Esperando MySQL..."
+          until mysql -h 127.0.0.1 -u ${{ secrets.DB_USER }} -p${{ secrets.DB_PASSWORD }} -e "SELECT 1" ; do
+            sleep 3
+          done
+
+      - name: Inicializar BD
+        run: mysql -h 127.0.0.1 -u ${{ secrets.DB_USER }} -p${{ secrets.DB_PASSWORD }} ${{ secrets.DB_DATABASE }} < db/database.sql
+
+      - name: Tests + cobertura
+        env:
+          PORT: 3000
+          DB_HOST: 127.0.0.1
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_DATABASE: ${{ secrets.DB_DATABASE }}
+          DB_PORT: 3306
+        run: npm run test:coverage
+
+      - name: Subir coverage (aunque fallen tests)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-node-${{ matrix.node-version }}
+          path: coverage/
+          retention-days: 5
+
+      - name: Crear tag ${{ inputs.tag }}
+        if: success()
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag ${{ inputs.tag }} ${{ github.sha }}
+          git push origin ${{ inputs.tag }}
+
+      - name: Desplegar en Render (Deploy Hook)
+        if: success()
+        run: |
+          echo "Disparando deploy en Render..."
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          echo "Deploy solicitado. Mira el dashboard de Render → Events para ver el progreso."
