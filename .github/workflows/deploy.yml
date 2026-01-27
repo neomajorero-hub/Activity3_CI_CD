@@ -1,0 +1,40 @@
+name: Deploy to Render (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión del release (ej: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+# Permisos para crear la etiqueta (tag)
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Bajamos el código
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Instalamos Node para poder usar comandos de git
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # 3. Crear el TAG (Etiqueta) en GitHub
+      - name: Create Git Tag
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag ${{ inputs.version }}
+          git push origin ${{ inputs.version }}
+
+      # 4. Avisar a Render para que despliegue
+      - name: Trigger Render Deploy
+        run: |
+          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
